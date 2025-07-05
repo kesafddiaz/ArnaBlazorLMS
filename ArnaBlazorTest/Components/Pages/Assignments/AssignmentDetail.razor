@@ -1,0 +1,250 @@
+@page "/assignment/{Id:int}"
+@using ArnaBlazorTest.Models
+@using ArnaBlazorTest.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize]
+@inject IAssignmentService AssignmentService
+@inject IQuizService QuizService
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Assignment Details</PageTitle>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <a href="/assignments" class="btn btn-outline-secondary">← Back to Assignments</a>
+        @if (assignment != null)
+        {
+            <span class="badge @GetStatusBadgeClass()">@GetAssignmentStatus()</span>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="alert alert-danger" role="alert">
+            @error
+        </div>
+    }
+    else if (assignment != null)
+    {
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h2 class="card-title">@assignment.Title</h2>
+                        <p class="lead">@assignment.Description</p>
+                        
+                        @if (!string.IsNullOrEmpty(assignment.MaterialUrl))
+                        {
+                            <div class="mt-4">
+                                <h5>Learning Material</h5>
+                                <a href="@assignment.MaterialUrl" target="_blank" class="btn btn-primary">
+                                    <i class="bi bi-box-arrow-up-right"></i> Open Learning Material
+                                </a>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @if (!hasSubmitted)
+                {
+                    <div class="card mt-4">
+                        <div class="card-body">
+                            <h5 class="card-title">Quiz</h5>
+                            <p class="text-muted">Answer all questions to complete this assignment.</p>
+                            
+                            <form @onsubmit="SubmitQuiz">
+                                @for (int i = 0; i < assignment.Questions.Count; i++)
+                                {
+                                    var question = assignment.Questions[i];
+                                    <div class="mb-4 p-3 border rounded">
+                                        <p class="fw-bold">Question @(i + 1): @question.QuestionText</p>
+                                        @foreach (var option in question.Options)
+                                        {
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" 
+                                                       name="question_@question.Id" 
+                                                       value="@option"
+                                                       @onchange="@(e => UpdateAnswer(question.Id, option))" />
+                                                <label class="form-check-label">@option</label>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="text-muted">
+                                        @answers.Count of @assignment.Questions.Count questions answered
+                                    </div>
+                                    <button type="submit" class="btn btn-primary" disabled="@(!IsQuizComplete())">
+                                        Submit Quiz
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="card mt-4">
+                        <div class="card-body">
+                            <h5 class="card-title">Quiz Results</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Score:</strong> @quizScore%</p>
+                                    <p><strong>Status:</strong> <span class="badge bg-success">Completed</span></p>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="progress">
+                                        <div class="progress-bar bg-success" role="progressbar" 
+                                             style="width: @quizScore%">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Assignment Info</h5>
+                        <ul class="list-unstyled">
+                            <li><strong>Questions:</strong> @assignment.Questions.Count</li>
+                            <li><strong>Created:</strong> @assignment.CreatedAt.ToString("MMM dd, yyyy")</li>
+                            @if (hasSubmitted)
+                            {
+                                <li><strong>Your Score:</strong> @quizScore%</li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private Assignment? assignment;
+    private bool isLoading = true;
+    private string? error;
+    private bool hasSubmitted;
+    private int quizScore;
+    private Dictionary<int, string> answers = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            
+            // Debug: Log all claims
+            Console.WriteLine($"User authenticated: {user.Identity?.IsAuthenticated}");
+            foreach (var claim in user.Claims)
+            {
+                Console.WriteLine($"Claim: {claim.Type} = {claim.Value}");
+            }
+            
+            var userId = int.Parse(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+            Console.WriteLine($"Retrieved user ID: {userId}");
+
+            if (userId == 0)
+            {
+                error = "User not authenticated properly.";
+                return;
+            }
+
+            assignment = await AssignmentService.GetAssignmentAsync(Id);
+            if (assignment == null)
+            {
+                error = "Assignment not found.";
+                return;
+            }
+
+            hasSubmitted = await QuizService.HasUserSubmittedQuiz(userId, Id);
+            if (hasSubmitted)
+            {
+                var progress = await QuizService.GetUserAnswers(userId, Id);
+                if (progress != null)
+                {
+                    answers = progress;
+                }
+                quizScore = await QuizService.GetUserScore(userId, Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            error = "Failed to load assignment. Please try again later.";
+            Console.WriteLine($"Error loading assignment: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void UpdateAnswer(int questionId, string answer)
+    {
+        answers[questionId] = answer;
+    }
+
+    private bool IsQuizComplete()
+    {
+        if (assignment == null) return false;
+        return answers.Count == assignment.Questions.Count;
+    }
+
+    private string GetAssignmentStatus()
+    {
+        return hasSubmitted ? "Completed" : "Pending";
+    }
+
+    private string GetStatusBadgeClass()
+    {
+        return hasSubmitted ? "bg-success" : "bg-warning";
+    }
+
+    private async Task SubmitQuiz()
+    {
+        try
+        {
+            isLoading = true;
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var userId = int.Parse(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+
+            if (userId == 0)
+            {
+                error = "User not authenticated properly.";
+                return;
+            }
+
+            var result = await QuizService.SubmitQuizAsync(userId, Id, answers);
+            quizScore = result.score;
+            hasSubmitted = true;
+        }
+        catch (Exception ex)
+        {
+            error = "Failed to submit quiz. Please try again.";
+            Console.WriteLine($"Error submitting quiz: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+} 

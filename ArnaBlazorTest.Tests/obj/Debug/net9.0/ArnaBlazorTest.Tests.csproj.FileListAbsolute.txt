@@ -1,0 +1,5 @@
+D:\Libraries\Documents\coding dump\.net\ArnaBlazorTest\ArnaBlazorTest.Tests\obj\Debug\net9.0\ArnaBlazorTest.Tests.csproj.AssemblyReference.cache
+D:\Libraries\Documents\coding dump\.net\ArnaBlazorTest\ArnaBlazorTest.Tests\obj\Debug\net9.0\ArnaBlazorTest.Tests.GeneratedMSBuildEditorConfig.editorconfig
+D:\Libraries\Documents\coding dump\.net\ArnaBlazorTest\ArnaBlazorTest.Tests\obj\Debug\net9.0\ArnaBlazorTest.Tests.AssemblyInfoInputs.cache
+D:\Libraries\Documents\coding dump\.net\ArnaBlazorTest\ArnaBlazorTest.Tests\obj\Debug\net9.0\ArnaBlazorTest.Tests.AssemblyInfo.cs
+D:\Libraries\Documents\coding dump\.net\ArnaBlazorTest\ArnaBlazorTest.Tests\obj\Debug\net9.0\ArnaBlazorTest.Tests.csproj.CoreCompileInputs.cache

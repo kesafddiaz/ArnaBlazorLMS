@@ -1,0 +1,303 @@
+@page "/manager/team"
+@using ArnaBlazorTest.Models
+@using ArnaBlazorTest.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Authorize(Roles = "Manager")]
+@inject IProgressService ProgressService
+@inject IUserManagementService UserManagementService
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>Team Progress</PageTitle>
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Team Progress Overview</h2>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" @onclick="ShowAssignLearnerModal">
+                <i class="bi bi-person-plus"></i> Assign Learner
+            </button>
+            <div class="input-group">
+                <input type="text" class="form-control" placeholder="Search users..." 
+                       @bind="searchTerm" @bind:event="oninput" />
+                <button class="btn btn-outline-secondary" type="button" @onclick="ApplySearch">
+                    <i class="bi bi-search"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="alert alert-danger" role="alert">
+            @error
+        </div>
+    }
+    else if (userProgressReports != null)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Team Overview</h5>
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h6>Total Learners</h6>
+                                    <h3>@userProgressReports.Count</h3>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h6>Active Learners</h6>
+                                    <h3>@GetActiveLearners()</h3>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h6>Team Average Score</h6>
+                                    <h3>@GetTeamAverageScore().ToString("F1")%</h3>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="text-center">
+                                    <h6>Completion Rate</h6>
+                                    <h3>@GetCompletionRateDisplay()</h3>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (userProgressReports.Any())
+        {
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Learner Progress</h5>
+                            <div class="row">
+                                @foreach (var report in userProgressReports)
+                                {
+                                    <div class="col-md-4 mb-4">
+                                        <UserProgressCard 
+                                            User="@report.User"
+                                            CompletedCount="@report.CompletedAssignments"
+                                            TotalCount="@report.TotalAssignments"
+                                            AverageScore="@report.AverageScore"
+                                            LastActivity="@GetLastActivity(report)"
+                                            ShowViewButton="true" />
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="alert alert-info" role="alert">
+                <h5>No learners assigned</h5>
+                <p>You don't have any learners assigned to your team yet. Use the "Assign Learner" button to add learners to your team.</p>
+            </div>
+        }
+    }
+</div>
+
+<!-- Assign Learner Modal -->
+@if (showAssignModal)
+{
+    <div class="modal fade show" style="display: block;" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Assign Learner to Team</h5>
+                    <button type="button" class="btn-close" @onclick="HideAssignLearnerModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (unassignedLearners != null && unassignedLearners.Any())
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Select Learner:</label>
+                            <select class="form-select" @bind="selectedLearnerId">
+                                <option value="0">Choose a learner...</option>
+                                @foreach (var learner in unassignedLearners)
+                                {
+                                    <option value="@learner.Id">@learner.Username (@learner.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No unassigned learners available.</p>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="HideAssignLearnerModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="AssignLearner" disabled="@(selectedLearnerId == 0)">
+                        Assign Learner
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private List<UserProgressReport>? userProgressReports;
+    private List<User>? unassignedLearners;
+    private bool isLoading = true;
+    private string? error;
+    private int managerId;
+    private string searchTerm = "";
+    private bool showAssignModal = false;
+    private int selectedLearnerId = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            managerId = int.Parse(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "0");
+
+            if (managerId == 0)
+            {
+                error = "Manager not authenticated properly.";
+                return;
+            }
+
+            await RefreshTeamData();
+        }
+        catch (Exception ex)
+        {
+            error = "Failed to load team progress. Please try again later.";
+            Console.WriteLine($"Error loading team progress: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowAssignLearnerModal()
+    {
+        showAssignModal = true;
+    }
+
+    private void HideAssignLearnerModal()
+    {
+        showAssignModal = false;
+        selectedLearnerId = 0;
+    }
+
+    private async Task AssignLearner()
+    {
+        if (selectedLearnerId == 0) return;
+
+        try
+        {
+            var success = await UserManagementService.AssignLearnerToManagerAsync(selectedLearnerId, managerId);
+            if (success)
+            {
+                // Refresh the data
+                await RefreshTeamData();
+                HideAssignLearnerModal();
+            }
+            else
+            {
+                error = "Failed to assign learner to team.";
+            }
+        }
+        catch (Exception ex)
+        {
+            error = "Failed to assign learner to team.";
+            Console.WriteLine($"Error assigning learner: {ex.Message}");
+        }
+    }
+
+    private async Task RefreshTeamData()
+    {
+        try
+        {
+            userProgressReports = await ProgressService.GetTeamProgressReportAsync(managerId);
+            unassignedLearners = await UserManagementService.GetUnassignedLearnersAsync();
+            
+            // Debug logging
+            Console.WriteLine($"Refreshed team data: {userProgressReports?.Count ?? 0} learners");
+            if (userProgressReports != null)
+            {
+                foreach (var report in userProgressReports)
+                {
+                    Console.WriteLine($"Learner {report.User.Username}: {report.CompletedAssignments}/{report.TotalAssignments} completed, {report.AverageScore:F1}% average");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error refreshing team data: {ex.Message}");
+            error = "Failed to refresh team data.";
+        }
+    }
+
+    private void ApplySearch()
+    {
+        if (string.IsNullOrWhiteSpace(searchTerm) || userProgressReports == null)
+        {
+            return;
+        }
+
+        userProgressReports = userProgressReports
+            .Where(r => r.User.Username.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                       r.User.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private int GetActiveLearners()
+    {
+        if (userProgressReports == null) return 0;
+        return userProgressReports.Count(r => r.Progresses.Any(p => p.SubmittedAt >= DateTime.UtcNow.AddDays(-7)));
+    }
+
+    private double GetTeamAverageScore()
+    {
+        if (userProgressReports == null || !userProgressReports.Any()) return 0;
+        return userProgressReports.Average(r => r.AverageScore);
+    }
+
+    private double GetCompletionRate()
+    {
+        if (userProgressReports == null || !userProgressReports.Any()) return 0;
+        var totalAssignments = userProgressReports.FirstOrDefault()?.TotalAssignments ?? 0;
+        if (totalAssignments == 0) return 0;
+
+        var totalCompleted = userProgressReports.Sum(r => r.CompletedAssignments);
+        return (double)totalCompleted / (userProgressReports.Count * totalAssignments);
+    }
+
+    private string GetCompletionRateDisplay()
+    {
+        var rate = GetCompletionRate();
+        return $"{rate * 100:F1}%";
+    }
+
+    private DateTime? GetLastActivity(UserProgressReport report)
+    {
+        return report.Progresses
+            .OrderByDescending(p => p.SubmittedAt)
+            .FirstOrDefault()?.SubmittedAt;
+    }
+} 

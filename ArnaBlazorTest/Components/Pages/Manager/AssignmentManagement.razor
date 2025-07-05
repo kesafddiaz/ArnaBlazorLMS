@@ -1,0 +1,308 @@
+@page "/manager/assignments"
+@using ArnaBlazorTest.Models
+@using ArnaBlazorTest.Services
+@attribute [Authorize(Roles = "Manager")]
+@inject IAssignmentService AssignmentService
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Assignment Management</PageTitle>
+
+<div class="container mt-4">
+    @if (isLoading)
+    {
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    }
+    else if (error != null)
+    {
+        <div class="alert alert-danger" role="alert">
+            @error
+        </div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>Assignment Management</h2>
+            <button class="btn btn-primary" @onclick="@(() => ShowAssignmentModal())">
+                Create Assignment
+            </button>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Description</th>
+                        <th>Material</th>
+                        <th>Questions</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var assignment in assignments)
+                    {
+                        <tr>
+                            <td>@assignment.Title</td>
+                            <td>@assignment.Description</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(assignment.MaterialUrl))
+                                {
+                                    <a href="@assignment.MaterialUrl" target="_blank">View Material</a>
+                                }
+                                else
+                                {
+                                    <span>No material</span>
+                                }
+                            </td>
+                            <td>@assignment.Questions.Count questions</td>
+                            <td>
+                                <span class="badge @(assignment.IsActive ? "bg-success" : "bg-secondary")">
+                                    @(assignment.IsActive ? "Active" : "Inactive")
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary me-2" @onclick="@(() => ShowAssignmentModal(assignment))">
+                                    Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="@(() => DeleteAssignment(assignment.Id))">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (showModal)
+{
+    <div class="modal fade show" style="display: block;" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(selectedAssignment == null ? "Create" : "Edit") Assignment</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="@assignmentModel" OnValidSubmit="SaveAssignment">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-3">
+                            <label class="form-label">Title</label>
+                            <InputText class="form-control" @bind-Value="assignmentModel.Title" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Description</label>
+                            <InputTextArea class="form-control" @bind-Value="assignmentModel.Description" rows="3" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Material URL</label>
+                            <InputText class="form-control" @bind-Value="assignmentModel.MaterialUrl" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Status</label>
+                            <div>
+                                <InputCheckbox @bind-Value="assignmentModel.IsActive" />
+                                <span class="ms-2">Active</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Questions (@assignmentModel.Questions.Count/5)</label>
+                            @if (assignmentModel.Questions.Count < 5)
+                            {
+                                <div class="alert alert-info">
+                                    <small>Each assignment must have exactly 5 questions. Add @(5 - assignmentModel.Questions.Count) more question(s).</small>
+                                </div>
+                            }
+                            @foreach (var question in assignmentModel.Questions)
+                            {
+                                <div class="card mb-3">
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label class="form-label">Question Text</label>
+                                            <InputText class="form-control" @bind-Value="question.QuestionText" />
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label class="form-label">Options (one per line)</label>
+                                            <InputTextArea class="form-control" value="@GetOptionsText(question)" @oninput="e => SetOptionsText(question, e.Value?.ToString())" rows="4" />
+                                        </div>
+
+                                        <div class="mb-3">
+                                            <label class="form-label">Correct Answer</label>
+                                            <InputText class="form-control" @bind-Value="question.CorrectAnswer" />
+                                        </div>
+
+                                        <button type="button" class="btn btn-danger" @onclick="@(() => RemoveQuestion(question))">
+                                            Remove Question
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+
+                            <button type="button" class="btn btn-secondary" @onclick="@AddQuestion" disabled="@(assignmentModel.Questions.Count >= 5)">
+                                Add Question (@assignmentModel.Questions.Count/5)
+                            </button>
+                        </div>
+
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code {
+    private List<Assignment> assignments = new();
+    private bool isLoading = true;
+    private string? error;
+    private bool showModal;
+    private Assignment? selectedAssignment;
+    private Assignment assignmentModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            assignments = await AssignmentService.GetAllAssignmentsAsync();
+        }
+        catch (Exception)
+        {
+            error = "Failed to load assignments. Please try again later.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void ShowAssignmentModal(Assignment? assignment = null)
+    {
+        selectedAssignment = assignment;
+        assignmentModel = assignment == null ? new Assignment() : new Assignment
+        {
+            Id = assignment.Id,
+            Title = assignment.Title,
+            Description = assignment.Description,
+            MaterialUrl = assignment.MaterialUrl,
+            IsActive = assignment.IsActive,
+            Questions = assignment?.Questions.Select(q => new Question
+            {
+                Id = q.Id,
+                QuestionText = q.QuestionText,
+                OptionsJson = q.OptionsJson,
+                CorrectAnswer = q.CorrectAnswer
+            }).ToList() ?? new List<Question>()
+        };
+        showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        selectedAssignment = null;
+        assignmentModel = new Assignment();
+    }
+
+    private async Task SaveAssignment()
+    {
+        try
+        {
+            // Validate that assignment has exactly 5 questions
+            if (assignmentModel.Questions.Count != 5)
+            {
+                error = "Each assignment must have exactly 5 questions.";
+                return;
+            }
+
+            // Validate that all questions have content
+            foreach (var question in assignmentModel.Questions)
+            {
+                if (string.IsNullOrWhiteSpace(question.QuestionText) || 
+                    string.IsNullOrWhiteSpace(question.CorrectAnswer) ||
+                    question.Options.Count < 2)
+                {
+                    error = "All questions must have question text, correct answer, and at least 2 options.";
+                    return;
+                }
+            }
+
+            if (selectedAssignment == null)
+            {
+                await AssignmentService.CreateAssignmentAsync(assignmentModel);
+            }
+            else
+            {
+                await AssignmentService.UpdateAssignmentAsync(selectedAssignment.Id, assignmentModel);
+            }
+
+            assignments = await AssignmentService.GetAllAssignmentsAsync();
+            CloseModal();
+        }
+        catch (Exception ex)
+        {
+            error = "Failed to save assignment. Please try again later.";
+            Console.WriteLine($"Error saving assignment: {ex.Message}");
+        }
+    }
+
+    private async Task DeleteAssignment(int id)
+    {
+        if (await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete this assignment?"))
+        {
+            try
+            {
+                await AssignmentService.DeleteAssignmentAsync(id);
+                assignments = await AssignmentService.GetAllAssignmentsAsync();
+            }
+            catch (Exception)
+            {
+                error = "Failed to delete assignment. Please try again later.";
+            }
+        }
+    }
+
+    private void AddQuestion()
+    {
+        if (assignmentModel.Questions.Count < 5)
+        {
+            assignmentModel.Questions.Add(new Question { OptionsJson = "[]" });
+        }
+    }
+
+    private void RemoveQuestion(Question question)
+    {
+        assignmentModel.Questions.Remove(question);
+    }
+
+    private string GetOptionsText(Question question)
+    {
+        return string.Join("\n", question.Options);
+    }
+
+    private void SetOptionsText(Question question, string? text)
+    {
+        if (text != null)
+        {
+            question.Options = text.Split('\n').Select(o => o.Trim()).Where(o => !string.IsNullOrEmpty(o)).ToList();
+        }
+    }
+} 
